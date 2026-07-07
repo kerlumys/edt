@@ -279,20 +279,36 @@ textarea.bp-input{resize:vertical;min-height:72px;line-height:1.5}
   .week-label{min-width:120px;font-size:13px}
   .topbar-right{flex-wrap:nowrap;overflow-x:auto;gap:4px;padding-bottom:2px}
   .topbar-right .btn{padding:5px 8px;font-size:11px}
-  .topbar-right .btn i{font-size:12px}
-  .palette{width:110px}
-  .palette.collapsed{width:0 !important;padding:0 !important}
   .zoom-ctrl{display:none}
-  /* Vue semaine/jour visible sur mobile */
   .view-toggle{display:flex !important}
-  body.mobile-init .palette{width:0;padding:0;border:none;opacity:0;overflow:hidden}
 
-  /* ── Grille scrollable horizontalement ── */
+  /* ── Palette : overlay (ne pousse plus la grille) ── */
+  .body{position:relative;overflow:hidden}
+  .palette{
+    position:absolute;top:0;left:0;bottom:0;z-index:40;
+    width:165px !important;
+    box-shadow:4px 0 28px rgba(0,0,0,.5);
+    transition:transform .22s cubic-bezier(.4,0,.2,1),opacity .2s;
+    transform:translateX(0)
+  }
+  .palette.collapsed{
+    transform:translateX(-110%) !important;
+    width:165px !important;padding:10px 10px 0 !important;
+    border:1px solid var(--border) !important;overflow:visible !important;opacity:0 !important
+  }
+  /* Backdrop semi-transparent pour fermer la palette */
+  .pal-backdrop{position:absolute;inset:0;background:rgba(0,0,0,.38);z-index:39;display:none;cursor:pointer}
+  .pal-backdrop.open{display:block}
+  /* Blocs catégorie compacts */
+  .pal-block{padding:6px 8px;font-size:11px}
+  #pal-dynamic{gap:5px !important}
+
+  /* ── Grille plein écran (palette overlay, pas de décalage) ── */
   .scroll-area{overflow-x:auto;overflow-y:auto}
   .day-headers{min-width:580px}
   .time-grid{min-width:580px}
 
-  /* ── Blocs : titre sur 2 lignes, heures compactes ── */
+  /* ── Blocs placés ── */
   .placed-block{padding:3px 5px}
   .placed-block .pb-title{white-space:normal;overflow:hidden;text-overflow:unset;
     display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;font-size:10px}
@@ -438,6 +454,9 @@ textarea.bp-input{resize:vertical;min-height:72px;line-height:1.5}
 
 <!-- Body -->
 <div class="body">
+
+  <!-- Backdrop mobile (ferme la palette au tap extérieur) -->
+  <div class="pal-backdrop" id="pal-backdrop"></div>
 
   <!-- Palette -->
   <div class="palette" id="palette">
@@ -2197,13 +2216,20 @@ function autoSave() {
 // Toggle palette
 // ══════════════════════════════════════════════════════════
 function _togglePalette() {
-  const pal = document.getElementById("palette");
+  const pal  = document.getElementById("palette");
   const icon = document.getElementById("pal-topbar-icon");
+  const bd   = document.getElementById("pal-backdrop");
   pal.classList.toggle("collapsed");
-  if (icon) _setIconName(icon, pal.classList.contains("collapsed") ? "layout-sidebar-left-expand" : "layout-sidebar-left-collapse");
+  const collapsed = pal.classList.contains("collapsed");
+  if (icon) _setIconName(icon, collapsed ? "layout-sidebar-left-expand" : "layout-sidebar-left-collapse");
+  if (bd) bd.classList.toggle("open", !collapsed);
   savePrefs();
 }
 document.getElementById("btn-pal-topbar").addEventListener("click", _togglePalette);
+document.getElementById("pal-backdrop").addEventListener("click", () => {
+  const pal = document.getElementById("palette");
+  if (!pal.classList.contains("collapsed")) _togglePalette();
+});
 
 // ══════════════════════════════════════════════════════════
 // Dupliquer un bloc
