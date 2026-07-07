@@ -277,7 +277,8 @@ textarea.bp-input{resize:vertical;min-height:72px;line-height:1.5}
 /* ── Responsive mobile ── */
 @media(max-width:640px){
   .topbar{padding:7px 10px;gap:5px}
-  .week-label{min-width:120px;font-size:13px}
+  .week-label{min-width:120px;font-size:13px;text-align:center}
+  .week-nav{flex:1;justify-content:center}
   .topbar-right{flex-wrap:nowrap;overflow-x:auto;gap:4px;padding-bottom:2px}
   .topbar-right .btn{padding:5px 8px;font-size:11px}
   .zoom-ctrl{display:none}
@@ -308,6 +309,10 @@ textarea.bp-input{resize:vertical;min-height:72px;line-height:1.5}
   .scroll-area{overflow-x:auto;overflow-y:auto}
   .day-headers{min-width:580px}
   .time-grid{min-width:580px}
+
+  /* ── Vue jour : blocs centrés, pas full-width ── */
+  .day-view .day-col{padding:0 12px}
+  .day-view .placed-block{border-radius:10px}
 
   /* ── Blocs placés ── */
   .placed-block{padding:3px 5px}
@@ -367,6 +372,12 @@ textarea.bp-input{resize:vertical;min-height:72px;line-height:1.5}
 
 /* SVG icons — offline, MIT (Feather/Tabler paths) */
 .ti-svg{display:inline-block;vertical-align:middle;flex-shrink:0;width:1em;height:1em;overflow:visible}
+/* ── PDF export overlay ── */
+#pdf-overlay{display:none;position:fixed;inset:0;z-index:200;background:#fff;overflow:auto}
+.pdf-actions{position:sticky;top:0;background:#fff;border-bottom:1px solid #e0ddd8;padding:10px 14px;display:flex;gap:10px;align-items:center;box-shadow:0 1px 4px rgba(0,0,0,.08)}
+.pdf-btn-close{padding:7px 14px;background:#f0ede8;border:none;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;color:#1a1916}
+.pdf-btn-print{padding:7px 14px;background:#3b7dd8;border:none;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;color:#fff}
+@media print{body>*:not(#pdf-overlay){display:none !important}#pdf-overlay{display:block !important;position:fixed !important;inset:0 !important;overflow:visible !important}.pdf-actions{display:none !important}}
 </style>
 </head>
 <body>
@@ -1139,8 +1150,10 @@ function renderPalette() {
         const relY = t.clientY - gridRect.top + scrollTop;
         const startMin = Math.max(HOUR_START * 60, Math.min(yToMin(relY), HOUR_END * 60 - 60));
         const endMin   = Math.min(startMin + 60, HOUR_END * 60);
+        const _di = parseInt(col.dataset.di);
+        if (hasOverlap(_di, startMin, endMin)) { toast("Créneau déjà occupé ⛔"); return; }
         pushUndo();
-        currentBlocks().push({ day: parseInt(col.dataset.di), cat: cat.id, startMin, endMin });
+        currentBlocks().push({ day: _di, cat: cat.id, startMin, endMin });
         renderBlocks(); renderWeekChips();
         toast(`${cat.label} ajouté`);
       };
@@ -1203,8 +1216,10 @@ function setupDropZones() {
       const relY = e.clientY - gridRect.top + document.getElementById("scroll-area").scrollTop;
       const startMin = Math.max(HOUR_START * 60, Math.min(yToMin(relY), HOUR_END * 60 - 60));
       const endMin   = Math.min(startMin + 60, HOUR_END * 60);
+      const _diM = parseInt(col.dataset.di);
+      if (hasOverlap(_diM, startMin, endMin)) { toast("Créneau déjà occupé ⛔"); return; }
       pushUndo();
-      currentBlocks().push({ day: parseInt(col.dataset.di), cat: catId, startMin, endMin });
+      currentBlocks().push({ day: _diM, cat: catId, startMin, endMin });
       renderBlocks(); renderWeekChips();
     });
   });
@@ -1264,8 +1279,13 @@ function makeDraggable(el, idx) {
       const b   = currentBlocks()[idx];
       const dur = b.endMin - b.startMin;
       const ns  = yToMin(Math.max(0, Math.min(startTop + dy, TOTAL_H - 20)));
+      const _origStart = b.startMin, _origEnd = b.endMin, _origDay = block.day;
       b.startMin = Math.max(HOUR_START * 60, Math.min(ns, HOUR_END * 60 - dur));
       b.endMin   = b.startMin + dur;
+      if (hasOverlap(b.day, b.startMin, b.endMin, idx)) {
+        b.startMin = _origStart; b.endMin = _origEnd; b.day = _origDay;
+        toast("Créneau déjà occupé ⛔");
+      }
       renderBlocks();
     };
 
@@ -1332,8 +1352,13 @@ function makeDraggable(el, idx) {
       const b   = currentBlocks()[idx];
       const dur = b.endMin - b.startMin;
       const ns  = yToMin(Math.max(0, Math.min(startTop + dy, TOTAL_H - 20)));
+      const _origStartT = b.startMin, _origEndT = b.endMin, _origDayT = b.day;
       b.startMin = Math.max(HOUR_START * 60, Math.min(ns, HOUR_END * 60 - dur));
       b.endMin   = b.startMin + dur;
+      if (hasOverlap(b.day, b.startMin, b.endMin, idx)) {
+        b.startMin = _origStartT; b.endMin = _origEndT; b.day = _origDayT;
+        toast("Créneau déjà occupé ⛔");
+      }
       renderBlocks();
     };
 
@@ -1539,51 +1564,64 @@ const DAYS_FULL = ["Lundi","Mardi","Mercredi","Jeudi","Vendredi","Samedi","Diman
 
 function exportWeekPDF() {
   const blocks = currentBlocks();
-  let rows = "";
-  for (let d = 0; d < 7; d++) {
-    const dayBlocks = blocks.filter(b => b.day === d).sort((a,b) => a.startMin - b.startMin);
-    if (!dayBlocks.length) continue;
-    rows += `<div class="day"><div class="day-title">${DAYS_FULL[d]}</div>`;
-    dayBlocks.forEach(b => {
-      const cat = STATE.cats.find(c => c.id === b.cat) || {label:b.cat, color:"gray"};
-      const dot = DOT_COLORS[cat.color] || "#888";
-      const title = b.title || cat.label;
-      rows += `<div class="row">
-        <span class="time">${formatTime(b.startMin)} – ${formatTime(b.endMin)}</span>
-        <span class="dot" style="background:${dot}"></span>
-        <span class="cat">${cat.label}</span>
-        <span class="title">${title !== cat.label ? title : ""}${b.note ? `<em> — ${b.note}</em>` : ""}</span>
-      </div>`;
-    });
-    rows += `</div>`;
+  if (!blocks.length) { toast("Aucun bloc à exporter"); return; }
+
+  const PDF_COLORS = {
+    teal:  {bg:"#D8EFF8",bd:"#3BA8C8",fg:"#0D3D52"},
+    green: {bg:"#DFF0E4",bd:"#5AAF72",fg:"#0E3519"},
+    blue:  {bg:"#D4E6F4",bd:"#2E6FA8",fg:"#0D2540"},
+    purple:{bg:"#E6E4FA",bd:"#7066CC",fg:"#1E1A55"},
+    amber: {bg:"#F5EDD8",bd:"#C9A96E",fg:"#3E2800"},
+    coral: {bg:"#F4E4DE",bd:"#C0664A",fg:"#40180C"},
+    pink:  {bg:"#FADEF0",bd:"#C06088",fg:"#40081C"},
+    gray:  {bg:"#E2E8F4",bd:"#8A9BB8",fg:"#1B2D52"},
+    red:   {bg:"#F4DEDE",bd:"#C05050",fg:"#400808"},
+  };
+
+  const HS = HOUR_START, HE = HOUR_END, HT = HE - HS;
+  const HPX = 40; // px per hour
+  const GH  = HT * HPX;
+
+  // Time axis
+  let timeAxis = '';
+  for (let h = HS; h <= HE; h++) {
+    const top = (h - HS) * HPX;
+    timeAxis += `<div style="position:absolute;top:${top}px;left:0;right:2px;font-size:9px;color:#aaa;text-align:right;line-height:1;transform:translateY(-50%)">${String(h).padStart(2,'0')}h</div>`;
+    if (h < HE) timeAxis += `<div style="position:absolute;top:${top}px;left:0;right:0;border-top:1px solid #eee;width:100%"></div>`;
   }
-  if (!rows) { toast("Aucun bloc à exporter"); return; }
 
-  const html = `<!DOCTYPE html><html><head><meta charset="UTF-8">
-  <title>EDT — ${weekLabel(STATE.currentWeek)}</title>
-  <style>
-    body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;padding:24px 32px;color:#1a1916;max-width:700px}
-    h1{font-size:17px;font-weight:700;margin-bottom:20px;color:#3b7dd8}
-    .day{margin-bottom:18px;break-inside:avoid}
-    .day-title{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:#6a6760;border-bottom:1px solid #ddd;padding-bottom:5px;margin-bottom:8px}
-    .row{display:flex;align-items:baseline;gap:8px;padding:4px 0;border-bottom:1px solid #f5f3f0;font-size:12px}
-    .time{color:#6a6760;width:110px;flex-shrink:0}
-    .dot{width:7px;height:7px;border-radius:50%;flex-shrink:0;margin-top:3px}
-    .cat{font-weight:600;width:80px;flex-shrink:0}
-    .title{flex:1;color:#1a1916} em{color:#aaa;font-style:italic}
-    @media print{body{padding:12px 16px}@page{margin:1.5cm}}
-  </style></head><body>
-  <h1>EDT — ${weekLabel(STATE.currentWeek)}</h1>
-  ${rows}
-  </body></html>`;
+  // Day columns
+  const dayNames = ['Lun','Mar','Mer','Jeu','Ven','Sam','Dim'];
+  let cols = '', headers = '';
+  for (let d = 0; d < 7; d++) {
+    headers += `<div style="flex:1;text-align:center;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#666;padding-bottom:5px;border-right:1px solid #eee">${dayNames[d]}</div>`;
+    const dayBlocks = blocks.filter(b => b.day === d);
+    let bHtml = '';
+    dayBlocks.forEach(b => {
+      const cat = STATE.cats.find(c => c.id === b.cat) || {label:b.cat, color:'gray'};
+      const col = PDF_COLORS[cat.color] || PDF_COLORS.gray;
+      const top = (b.startMin - HS * 60) / 60 * HPX;
+      const h   = Math.max((b.endMin - b.startMin) / 60 * HPX, 14);
+      bHtml += `<div style="position:absolute;left:2px;right:2px;top:${top}px;height:${h}px;background:${col.bg};border-left:3px solid ${col.bd};color:${col.fg};border-radius:4px;padding:2px 4px;font-size:9px;font-weight:600;overflow:hidden;line-height:1.25">` +
+        `${cat.label}<br><span style="font-weight:400;font-size:8px">${formatTime(b.startMin)}</span></div>`;
+    });
+    cols += `<div style="flex:1;position:relative;height:${GH}px;border-right:1px solid #eee">${bHtml}</div>`;
+  }
 
-  const win = window.open("", "_blank");
-  if (!win) { toast("Autorise les popups pour l'export PDF"); return; }
-  win.document.write(html);
-  win.document.close();
-  win.focus();
-  setTimeout(() => win.print(), 400);
+  const lbl = weekLabel(STATE.currentWeek);
+  document.getElementById('pdf-title').textContent = 'EDT — ' + lbl;
+  document.getElementById('pdf-content').innerHTML = `
+    <div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;padding:0 4px">
+      <div style="display:flex;margin-left:36px;border-left:1px solid #eee">${headers}</div>
+      <div style="display:flex">
+        <div style="width:36px;position:relative;height:${GH}px;flex-shrink:0">${timeAxis}</div>
+        <div style="flex:1;display:flex;border-top:1px solid #eee;border-left:1px solid #eee">${cols}</div>
+      </div>
+    </div>`;
+  document.getElementById('pdf-overlay').style.display = 'block';
+  document.getElementById('export-menu').classList.remove('open');
 }
+
 
 function exportWeekCSV() {
   const blocks = currentBlocks();
@@ -2406,6 +2444,12 @@ function _pinShowError(msg) {
 // Hash SHA-256 du PIN par défaut (jamais le PIN en clair dans le source)
 const _DEFAULT_PIN_HASH = "FAvvlEkUlMZSlcgLACnUsBgbMHPRMTH1UTB47UNOE4o=";
 
+function hasOverlap(day, startMin, endMin, excludeIdx) {
+  return currentBlocks().some((b, i) => {
+    if (excludeIdx !== undefined && i === excludeIdx) return false;
+    return b.day === day && startMin < b.endMin && endMin > b.startMin;
+  });
+}
 function _setIconName(el,name){var u=el&&el.querySelector("use");if(u)u.setAttribute("href","#ti-"+name);}
 async function _hashPin(pin) {
   const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(pin));
@@ -2467,5 +2511,15 @@ document.addEventListener("keydown", e => {
   }
 });
 </script>
+<!-- ── PDF export overlay ── -->
+<div id="pdf-overlay">
+  <div class="pdf-actions">
+    <button class="pdf-btn-close" onclick="document.getElementById('pdf-overlay').style.display='none'">✕ Fermer</button>
+    <span id="pdf-title" style="flex:1;font-size:13px;font-weight:600;color:#1a1916;text-align:center"></span>
+    <button class="pdf-btn-print" onclick="window.print()">🖨 Imprimer / PDF</button>
+  </div>
+  <div id="pdf-content" style="padding:16px;min-height:100vh;background:#fff"></div>
+</div>
+
 </body>
 </html>
